@@ -280,11 +280,13 @@ int main(int argc, char *argv[])
         }
 
     }
-    
+
+#if 0
     // set CPU priority to high
     if (setpriority(PRIO_PROCESS, 0, -20) < 0) {
         perror("setpriority");
     }
+#endif
 
     // printf("dimension: %d, algorithm: %d ws: %.1f\n", dimension, algo,
     //        (float)dimension*dimension*sizeof(float)*3/1024);
