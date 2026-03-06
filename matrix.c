@@ -19,12 +19,34 @@
 #include <sys/types.h>
 #include <sys/resource.h>
 #include <string.h>
+#include <limits.h>
+#include <stdint.h>
 // #include <omp.h>
 
 /* change dimension size as needed */
 struct timeval tv; 
 int dimension = 1024;
 double start, end; /* time */
+
+static int calc_matrix_bytes(int dimension, size_t *bytes)
+{
+    if (dimension <= 0) {
+        return -1;
+    }
+
+    size_t n = (size_t)dimension;
+    if (n > SIZE_MAX / n) {
+        return -1;
+    }
+
+    size_t elems = n * n;
+    if (elems > SIZE_MAX / sizeof(float)) {
+        return -1;
+    }
+
+    *bytes = elems * sizeof(float);
+    return 0;
+}
 
 double timestamp()
 {
@@ -92,18 +114,22 @@ void matmult_opt1_jk(float *A, float *B, float *C, int dimension)
     }	
 }
 
-// matrix multiplication with jk order switch and tiling    
+// matrix multiplication with jk order switch and tiling
+// Handles tail tiles when dimension is not a multiple of block size.
 void matmult_opt2_jk_tiling(float *A, float *B, float *C, int dimension)
 {
     int i,j,k,ii,jj,kk;
     int bs = 256; // block size = 256*256*4 = 256KB
 
     for(i = 0; i < dimension; i+=bs) {
+        int i_end = (i + bs < dimension) ? i + bs : dimension;
         for(k = 0; k < dimension; k+=bs) {
+            int k_end = (k + bs < dimension) ? k + bs : dimension;
             for(j = 0; j < dimension; j+=bs) {
-                for(ii = i; ii < i+bs; ii++) {
-                    for(kk = k; kk < k+bs; kk++) {
-                        for(jj = j; jj < j+bs; jj++) {
+                int j_end = (j + bs < dimension) ? j + bs : dimension;
+                for(ii = i; ii < i_end; ii++) {
+                    for(kk = k; kk < k_end; kk++) {
+                        for(jj = j; jj < j_end; jj++) {
                             C[dimension*ii+jj] += (A[dimension*ii+kk] * B[dimension*kk+jj]);
                         }
                     }
@@ -129,8 +155,16 @@ void transpose_naive(float *src, float *dst, int src_row, int src_col)
 void matmult_opt3_transposed(float *A, float *B, float *C, int dimension)
 {
     int i,j,k;
-    int alloc_size = dimension*dimension*sizeof(float);
+    size_t alloc_size;
+    if (calc_matrix_bytes(dimension, &alloc_size) != 0) {
+        fprintf(stderr, "Invalid dimension for allocation\n");
+        return;
+    }
     float *Bt = (float*)malloc(alloc_size);
+    if (!Bt) {
+        fprintf(stderr, "Failed to allocate memory\n");
+        return;
+    }
     transpose_naive(B, Bt, dimension, dimension);
 
     for(i = 0; i < dimension; i++) {
@@ -150,7 +184,11 @@ void matmult_opt3_transposed(float *A, float *B, float *C, int dimension)
 // matrix multiplicaiton transposed with AVX2 SIMD
 void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
 
-    int alloc_size = dimension*dimension*sizeof(float);
+    size_t alloc_size;
+    if (calc_matrix_bytes(dimension, &alloc_size) != 0) {
+        fprintf(stderr, "Invalid dimension for allocation\n");
+        return;
+    }
     float *Bt = (float*)aligned_alloc(32, alloc_size); // 32-byte aligned allocation for AVX2
     if (!Bt) {
         fprintf(stderr, "Failed to allocate aligned memory\n");
@@ -164,8 +202,8 @@ void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
             int k;
             // Process 8 elements at a time
             for (k = 0; k <= dimension - 8; k += 8) {
-                __m256 a = _mm256_load_ps(A + i * dimension + k); // Use aligned load
-                __m256 b = _mm256_load_ps(Bt + j * dimension + k); // Use aligned load
+                __m256 a = _mm256_loadu_ps(A + i * dimension + k);
+                __m256 b = _mm256_loadu_ps(Bt + j * dimension + k);
                 __m256 mul = _mm256_mul_ps(a, b); // Multiply vectors
                 acc = _mm256_add_ps(acc, mul); // Accumulate
             }
@@ -196,24 +234,37 @@ void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
 // matrix multiplicaiton transposed with SIMD
 void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
 
-    int alloc_size = dimension*dimension*sizeof(float);
+    size_t alloc_size;
+    if (calc_matrix_bytes(dimension, &alloc_size) != 0) {
+        fprintf(stderr, "Invalid dimension for allocation\n");
+        return;
+    }
     float *Bt = (float*)malloc(alloc_size);
+    if (!Bt) {
+        fprintf(stderr, "Failed to allocate memory\n");
+        return;
+    }
     transpose_naive(B, Bt, dimension, dimension);
 
     for (int i = 0; i < dimension; i++) {
         for (int j = 0; j < dimension; j++) {
             float accumulators[4] = {0, 0, 0, 0};
             __m128 *acc = (__m128 *) accumulators;
-            for (int k = 0; k < dimension; k += 4) {
+            int k;
+            for (k = 0; k <= dimension - 4; k += 4) {
                 // fprintf(stderr, "[%d,%d,%d]\n", i, j, k);
-                __m128 a = _mm_load_ps(A + i * dimension + k); // Load 4 values from matrixA
-                __m128 b = _mm_load_ps(Bt + j * dimension + k); // Load 4 values from matrixB
+                __m128 a = _mm_loadu_ps(A + i * dimension + k); // Load 4 values from matrixA
+                __m128 b = _mm_loadu_ps(Bt + j * dimension + k); // Load 4 values from matrixB
                 __m128 mul = _mm_mul_ps(a, b); // Multiply and accumulate using dot product
                 *acc = _mm_add_ps(*acc, mul);
                 // Repeat the above steps for the remaining elements of the current row and column
             }
             // Store the result in the output matrix
-            *(C + i * dimension + j) = accumulators[0] + accumulators[1] + accumulators[2] + accumulators[3];
+            float result = accumulators[0] + accumulators[1] + accumulators[2] + accumulators[3];
+            for (; k < dimension; k++) {
+                result += A[i * dimension + k] * Bt[j * dimension + k];
+            }
+            *(C + i * dimension + j) = result;
             // fprintf(stderr, "[%d,%d]=%.2f\n", i, j, result[i*dimension+j]);
         }
     }
@@ -224,8 +275,16 @@ void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
 // matrix multiplicaiton transposed with SIMD
 void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
 
-    int alloc_size = dimension*dimension*sizeof(float);
+    size_t alloc_size;
+    if (calc_matrix_bytes(dimension, &alloc_size) != 0) {
+        fprintf(stderr, "Invalid dimension for allocation\n");
+        return;
+    }
     float *Bt = (float*)malloc(alloc_size);
+    if (!Bt) {
+        fprintf(stderr, "Failed to allocate memory\n");
+        return;
+    }
     transpose_naive(B, Bt, dimension, dimension);
 
     // matrix multiplication of A and B into C
@@ -233,7 +292,8 @@ void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
         for (int j = 0; j < dimension; j++) {
             float accumulators[4] = {0, 0, 0, 0};
             float32x4_t *acc = (float32x4_t *) accumulators;
-            for (int k = 0; k < dimension; k += 4) {
+            int k;
+            for (k = 0; k <= dimension - 4; k += 4) {
                 // fprintf(stderr, "[%d,%d,%d]\n", i, j, k);
                 float32x4_t a = vld1q_f32(A + i * dimension + k); // Load 4 values from matrixA
                 float32x4_t b = vld1q_f32(Bt + j * dimension + k); // Load 4 values from matrixB
@@ -242,7 +302,11 @@ void matmult_opt4_transposed_simd(float* A, float* B, float* C, int dimension) {
                 // Repeat the above steps for the remaining elements of the current row and column
             }
             // Store the result in the output matrix
-            *(C + i * dimension + j) = accumulators[0] + accumulators[1] + accumulators[2] + accumulators[3];
+            float result = accumulators[0] + accumulators[1] + accumulators[2] + accumulators[3];
+            for (; k < dimension; k++) {
+                result += A[i * dimension + k] * Bt[j * dimension + k];
+            }
+            *(C + i * dimension + j) = result;
             // fprintf(stderr, "[%d,%d]=%.2f\n", i, j, result[i*dimension+j]);
         }
     }
@@ -266,8 +330,15 @@ int main(int argc, char *argv[])
     while ((opt = getopt(argc, argv, "m:n:a:h")) != -1) {
         switch (opt) {
         case 'n':
-            dimension = strtol(optarg, NULL, 0);
+        {
+            long parsed = strtol(optarg, NULL, 0);
+            if (parsed <= 0 || parsed > INT_MAX) {
+                fprintf(stderr, "Invalid dimension: %s\n", optarg);
+                return EXIT_FAILURE;
+            }
+            dimension = (int)parsed;
             break;
+        }
         case 'a':
             algo = strtol(optarg, NULL, 0);
             break;
@@ -291,7 +362,11 @@ int main(int argc, char *argv[])
     // printf("dimension: %d, algorithm: %d ws: %.1f\n", dimension, algo,
     //        (float)dimension*dimension*sizeof(float)*3/1024);
 
-    int alloc_size = dimension*dimension*sizeof(float);
+    size_t alloc_size;
+    if (calc_matrix_bytes(dimension, &alloc_size) != 0) {
+        fprintf(stderr, "Invalid dimension for allocation\n");
+        return EXIT_FAILURE;
+    }
     // Use aligned allocation for better SIMD performance
     A = (float*)aligned_alloc(32, alloc_size);
     B = (float*)aligned_alloc(32, alloc_size);

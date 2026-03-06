@@ -1,19 +1,138 @@
-# matmult
+# Matrix Multiplication Microbenchmark (`matmult`)
 
-## A*B on M1
-| dimension	| dense	    | sparse (10%)	| sparse (50%)	|
-|-----------|-----------|---------------|---------------|
-|10	        | 0.000012	| 0.000038	    | 0.000076	    |
-|100	      | 0.000224	| 0.000897	    | 0.002076	    |
-|1000	      | 0.074843	| 0.157203	    | 1.148960	    |
-|2000	      | 0.484162	| 0.880995	    | 8.841200	    |
-				
-## A*B on xeon E5-2658			
-| dimension | dense	    | sparse (10%)  | sparse (50%)	|
-|-----------|-----------|---------------|---------------|
-| 10	      | 0.000008	| 0.000011	    | 0.000027	    |
-| 100	      | 0.000717	| 0.000388	    | 0.000855	    |
-| 1000	    | 0.219490	| 0.098935	    | 0.281870	    |
-| 2000	    | 1.488919	| 0.510150	    | 2.017370      |	
+A C microbenchmark for comparing several matrix multiplication implementations, from a naive triple loop to cache-aware and SIMD-accelerated variants.
 
-(units are in seconds).
+This project is useful for studying how loop ordering, cache behavior, transposition, and vector instructions affect dense GEMM-like workloads on modern CPUs.
+
+## Features
+
+- Single-binary benchmark (`matrix`) with selectable algorithm variants
+- Configurable square matrix size (`-n`)
+- Deterministic random initialization (fixed seed) for reproducible checksums
+- Simple timing output suitable for scripting
+- Includes a helper evaluation script (`eval.sh`) for size sweeps
+
+## Repository Layout
+
+- `matrix.c`: benchmark implementation and algorithm variants
+- `Makefile`: build configuration
+- `eval.sh`: quick performance sweep by matrix size for a selected algorithm
+
+## Build
+
+### Prerequisites
+
+- Linux
+- GCC toolchain with C11 support (`gcc`, `make`)
+
+### Compile
+
+```bash
+make
+```
+
+By default, the `Makefile` uses:
+
+- `-Ofast`
+- `-march=native`
+- `-flto`
+- `-std=c11`
+
+To clean build artifacts:
+
+```bash
+make clean
+```
+
+## Usage
+
+```bash
+./matrix [-n dimension] [-a algorithm]
+```
+
+- `-n`: square matrix dimension (default: `1024`)
+- `-a`: algorithm selector
+
+Algorithm IDs:
+
+- `0`: naive `i-j-k`
+- `1`: loop reorder `i-k-j`
+- `2`: loop reorder + tiling (block size 256)
+- `3`: transpose `B` then multiply
+- `4`: transpose + SIMD path (AVX2/SSE/NEON depending on build target)
+- `99`: run all algorithms in sequence
+
+Show help:
+
+```bash
+./matrix -h
+```
+
+## Example
+
+Run all variants for a 256x256 matrix:
+
+```bash
+./matrix -n 256 -a 99
+```
+
+Typical output format:
+
+```text
+matmult_opt0  0.044723  chsum: -648.131751
+matmult_opt1  0.004007  chsum: -648.131751
+matmult_opt2  0.003787  chsum: -648.131751
+matmult_opt3  0.016045  chsum: -648.131751
+matmult_opt4  0.003884  chsum: -648.131646
+```
+
+Fields:
+
+- first column: algorithm label
+- second column: elapsed time in seconds
+- third column: checksum of output matrix (`C`) for quick correctness sanity checks
+
+## Batch Evaluation
+
+`eval.sh` sweeps dimensions and prints a compact table.
+
+```bash
+./eval.sh <algorithm>
+```
+
+Example:
+
+```bash
+./eval.sh 1
+```
+
+Output columns:
+
+- `n`: matrix dimension
+- `ws`: approximate matrix working-set size in KiB (`n*n*4*3/1024`)
+- `dur`: measured duration in seconds
+
+## Notes On Correctness And Comparisons
+
+- Random inputs are generated with a fixed seed (`srand(292)`), so checksums are reproducible for the same build and architecture.
+- Small checksum differences between SIMD and non-SIMD paths are expected due to floating-point accumulation order.
+
+## Known Limitations
+
+- Tiled and SIMD kernels perform best when dimensions align with vector/block widths.
+- Algorithm `99` runs all variants sequentially, so runtime can be long for large matrices.
+- SIMD behavior depends on target ISA selected by the compiler and CPU (`AVX2`, `SSE`, or `NEON`).
+
+## Reproducibility Tips
+
+- Run on an otherwise idle machine.
+- Pin process to a core if needed using `taskset`.
+- Repeat runs and compare medians rather than single samples.
+
+## Acknowledgments
+
+The implementation references optimization ideas discussed in:
+
+- https://vaibhaw-vipul.medium.com/matrix-multiplication-optimizing-the-code-from-6-hours-to-1-sec-70889d33dcfa
+- https://www.dropbox.com/scl/fi/42b23nby5k5d09bpwd1cx/lec11.pdf?rlkey=e2ce7bs8ssgtb82isxgv4y7ij&dl=0
+
