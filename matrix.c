@@ -18,6 +18,9 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/resource.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <linux/perf_event.h>
 #include <string.h>
 #include <limits.h>
 #include <stdint.h>
@@ -81,13 +84,48 @@ double print_checksum(float *C, int dimention)
     return sum;
 }
 
+/* ARM Cortex-A72 PMU event 0x17 = l2d_cache_refill */
+static int perf_open_l2d_refill(void)
+{
+    struct perf_event_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.type           = PERF_TYPE_RAW;
+    attr.size           = sizeof(attr);
+    attr.config         = 0x17;
+    attr.disabled       = 1;
+    attr.exclude_hv     = 1;
+    int fd = (int)syscall(SYS_perf_event_open, &attr, 0, -1, -1, 0);
+    if (fd >= 0) {
+        ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+        ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+    }
+    return fd;
+}
+
+static uint64_t perf_read_close(int fd)
+{
+    uint64_t count = 0;
+    if (fd >= 0) {
+        ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+        read(fd, &count, sizeof(count));
+        close(fd);
+    }
+    return count;
+}
+
 #define BENCH(func) \
-    init_data(A, B, C, dimension); \
-    start = timestamp(); \
-    func; \
-    end = timestamp(); \
-    print_checksum(C, dimension); \
-    printf("%.12s  %.6f  chsum: %.6f\n", #func, end-start, print_checksum(C, dimension));
+    do { \
+        init_data(A, B, C, dimension); \
+        int _pfd = perf_open_l2d_refill(); \
+        start = timestamp(); \
+        func; \
+        end = timestamp(); \
+        uint64_t _refills = perf_read_close(_pfd); \
+        double _elapsed = end - start; \
+        double _bw = (_elapsed > 0.0) ? (_refills * 64.0) / (_elapsed * 1024.0 * 1024.0) : 0.0; \
+        printf("%.12s  %.6f  chsum: %.6f  bw: %.1f MB/s\n", \
+               #func, _elapsed, print_checksum(C, dimension), _bw); \
+    } while(0)
 
 
 // a naive matrix multiplication implementation. 
@@ -385,26 +423,26 @@ int main(int argc, char *argv[])
 
     switch(algo) {
     case 0:
-        BENCH(matmult_opt0_naive(A, B, C, dimension))
+        BENCH(matmult_opt0_naive(A, B, C, dimension));
         break;
     case 1:
-        BENCH(matmult_opt1_jk(A, B, C, dimension))
+        BENCH(matmult_opt1_jk(A, B, C, dimension));
         break;
     case 2:
-        BENCH(matmult_opt2_jk_tiling(A, B, C, dimension))
+        BENCH(matmult_opt2_jk_tiling(A, B, C, dimension));
         break;
     case 3:
-        BENCH(matmult_opt3_transposed(A, B, C, dimension))
+        BENCH(matmult_opt3_transposed(A, B, C, dimension));
         break;
     case 4:
-        BENCH(matmult_opt4_transposed_simd(A, B, C, dimension))
+        BENCH(matmult_opt4_transposed_simd(A, B, C, dimension));
         break;
     case 99:
-        BENCH(matmult_opt0_naive(A, B, C, dimension))
-        BENCH(matmult_opt1_jk(A, B, C, dimension))
-        BENCH(matmult_opt2_jk_tiling(A, B, C, dimension))
-        BENCH(matmult_opt3_transposed(A, B, C, dimension))
-        BENCH(matmult_opt4_transposed_simd(A, B, C, dimension))
+        BENCH(matmult_opt0_naive(A, B, C, dimension));
+        BENCH(matmult_opt1_jk(A, B, C, dimension));
+        BENCH(matmult_opt2_jk_tiling(A, B, C, dimension));
+        BENCH(matmult_opt3_transposed(A, B, C, dimension));
+        BENCH(matmult_opt4_transposed_simd(A, B, C, dimension));
         break;
     default:
         printf("invalid algorithm\n");
