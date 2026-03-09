@@ -123,7 +123,7 @@ static uint64_t perf_read_close(int fd)
         uint64_t _refills = perf_read_close(_pfd); \
         double _elapsed = end - start; \
         double _bw = (_elapsed > 0.0) ? (_refills * 64.0) / (_elapsed * 1024.0 * 1024.0) : 0.0; \
-        printf("%.12s  %.6f  chsum: %.6f  bw: %.1f MB/s\n", \
+        printf("%.12s  %.6f  chsum: %.6f  bw: %.1f MiB/s\n", \
                #func, _elapsed, print_checksum(C, dimension), _bw); \
     } while(0)
 

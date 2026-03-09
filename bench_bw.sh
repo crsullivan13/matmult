@@ -60,4 +60,4 @@ median_bw=$(median_field "${bw_values[@]}")
 median_time=$(median_field "${time_values[@]}")
 
 CORE_STR=${CORE:+" core=$CORE"}
-echo "size=$SIZE algo=$ALGO runs=$RUNS${CORE_STR}  median_time=${median_time}s  median_bw=${median_bw} MB/s"
+echo "size=$SIZE algo=$ALGO runs=$RUNS${CORE_STR}  median_time=${median_time}s  median_bw=${median_bw} MiB/s"
