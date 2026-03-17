@@ -1,14 +1,11 @@
-CC=gcc
-OPTS=-Ofast -march=native -flto
+CC=riscv64-unknown-linux-gnu-gcc
+OPTS=-Ofast -march=rv64gc -flto
 CFLAGS=$(OPTS) -std=c11 -g
-LFLAGS=-flto 
 
-CXX=g++
-# Auto-detect Eigen path
-EIGEN_PATH := $(shell if [ -d "/usr/include/eigen3" ]; then echo "/usr/include/eigen3"; elif [ -d "/opt/homebrew/Cellar/eigen/3.4.0_1/include/eigen3" ]; then echo "/opt/homebrew/Cellar/eigen/3.4.0_1/include/eigen3"; else echo "/usr/include/eigen3"; fi)
-CXXFLAGS=-I$(EIGEN_PATH) $(OPTS) -std=c++17
+CXX=riscv64-unknown-linux-gnu-g++
+CXXFLAGS=$(OPTS) -std=c++17
 
-all: matrix matmult-eigen-dense matmult-eigen-sparse
+all: matrix
 
 clean:
-	rm -f matrix matmult-eigen-dense matmult-eigen-sparse
+	rm -f matrix
