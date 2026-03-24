@@ -136,3 +136,15 @@ The implementation references optimization ideas discussed in:
 - https://vaibhaw-vipul.medium.com/matrix-multiplication-optimizing-the-code-from-6-hours-to-1-sec-70889d33dcfa
 - https://www.dropbox.com/scl/fi/42b23nby5k5d09bpwd1cx/lec11.pdf?rlkey=e2ce7bs8ssgtb82isxgv4y7ij&dl=0
 
+## Citation
+
+If you use this benchmark, please cite:
+
+    @inproceedings{sullivan2026rtas,
+        title = {{Per-Bank Memory Bandwidth Regulation for Predictable and Performant Real-Time Systems}},
+        author = {Connor Sullivan and Amin Mamandipoor and Cole Strickler and Heechul Yun},
+        booktitle = {IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)},
+        year = {2026},
+        month = {May}
+    }
+
